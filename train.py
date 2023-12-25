@@ -1,115 +1,99 @@
 import torch
 import torch.nn.functional as F
-import numpy as np
 
-from cifar.models import ImagenetConvNet, AlexNet
+from models import AlexNet
+from data_loader import get_data_loader
+from helpers import AverageMeter
 
-IMAGENET_BASE_PATH = "data/preprocessed/"
-TRAIN_PATH = IMAGENET_BASE_PATH + "train/"
-VAL_PATH = IMAGENET_BASE_PATH + "val/"
-NUM_TRAIN_CHUNKS = 8
-NUM_VAL_CHUNKS = 1
-
+IMAGE_SIZE = 224
 LOAD_MODEL = None # set to path of model to load
-BATCH_SIZE = 96
-EPOCHS = 60
-LEARNING_RATE = 0.001
+BATCH_SIZE = 128
+EPOCHS = 90
+LEARNING_RATE = 0.01
+MOMENTUM = 0.9
+WEIGHT_DECAY = 0.0005
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+#print("Using device: " + str(DEVICE))
 
-# create model and load parameter checkpoint if LOAD_MODEL is defined
-model = AlexNet()
+model = AlexNet(input_channels=3, input_height=IMAGE_SIZE, input_width=IMAGE_SIZE, num_classes=1000)
 if LOAD_MODEL is not None:
     model.load_state_dict(torch.load(LOAD_MODEL))
 model = model.to(DEVICE)
 
-# create optimizer and loss function
-optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY)
 loss_fn = torch.nn.CrossEntropyLoss()
 
-# training loop
+train_loader, val_loader = get_data_loader(image_size=IMAGE_SIZE, batch_size=BATCH_SIZE)
+
 for epoch in range(EPOCHS):
     print("Epoch: " + str(epoch+1) + "/" + str(EPOCHS))
 
-    train_loss = 0
+    train_loss = AverageMeter()
     train_accuracy = 0
-    images_processed = 0
+    train_images_seen = 0
+
     model.train()
-
-    X = None
-    y = None
-
-    for chunk in range(NUM_TRAIN_CHUNKS):
-        X = np.load(TRAIN_PATH + "train_image_chunk_" + str(chunk + 1) + ".npy")
-        y = np.load(TRAIN_PATH + "train_label_chunk_" + str(chunk + 1) + ".npy")
-        n_train_batches = len(X)//BATCH_SIZE + 1
-
-        for i in range(0, len(X), BATCH_SIZE):
-            x_batch = torch.tensor(X[i:i+BATCH_SIZE].astype(np.float32)/255.0).to(DEVICE)
-            y_batch = torch.tensor(y[i:i+BATCH_SIZE]).to(DEVICE)
-
-            # forward pass
-            y_pred = model(x_batch)
-
-            # compute loss
-            loss = loss_fn(y_pred, y_batch)
-            train_loss += loss.item()
-
-            # backward pass
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            # compute accuracy
-            y_pred = F.softmax(y_pred, dim=1)
-            y_pred = torch.argmax(y_pred, dim=1)
-            train_accuracy += torch.sum(y_pred == y_batch).item()
-
-            images_processed += len(x_batch)
-
-            print(
-                "chunk: " + str(chunk + 1) + "/" + str(NUM_TRAIN_CHUNKS) + " - " +
-                "batch: " + str(i//BATCH_SIZE + 1) + "/" + str(n_train_batches) + " - " +
-                "train_loss: " + str(round(train_loss/images_processed, 4)) + " - " +
-                "train_accuracy: " + str(round(train_accuracy/images_processed, 4)) + " "*10, end="\r"
-            )
-
-        del X
-        del y
-
-
-    # compute validation loss and accuracy
-    val_loss = 0
-    val_accuracy = 0
-    model.eval()
-
-    X = np.load(VAL_PATH + "val_image_chunk_1.npy")
-    y = np.load(VAL_PATH + "val_label_chunk_1.npy")
-    n_val_batches = len(X)//BATCH_SIZE + 1
-
-    for i in range(0, len(X), BATCH_SIZE):
-        x_batch = torch.tensor(X[i:i+BATCH_SIZE].astype(np.float32)/255.0).to(DEVICE)
-        y_batch = torch.tensor(y[i:i+BATCH_SIZE]).to(DEVICE)
+    for i, (images, labels) in enumerate(train_loader):
+        images = images.to(DEVICE)
+        labels = labels.to(DEVICE)
 
         # forward pass
-        y_pred = model(x_batch)
+        output = model(images)
 
         # compute loss
-        loss = loss_fn(y_pred, y_batch)
-        val_loss += loss.item()
+        loss = loss_fn(output, labels)
+        train_loss.update(loss.item(), images.size(0))
 
         # compute accuracy
-        y_pred = F.softmax(y_pred, dim=1)
-        y_pred = torch.argmax(y_pred, dim=1)
-        val_accuracy += torch.sum(y_pred == y_batch).item()
+        output = torch.argmax(output, dim=1)
+        correctly_predicted = torch.sum(output == labels).item()
+        train_accuracy += correctly_predicted 
+        train_images_seen += images.size(0)
+
+        # backward pass
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        print(
+            "batch: " + str(i+1) + "/" + str(len(train_loader)) + " - " +
+            "train_loss: " + str(train_loss) + " - " +
+            "train_accuracy: " + str(round(train_accuracy/train_images_seen, 4)) + " "*10, end="\r"
+        )
+
+    # validation
+    val_loss = AverageMeter()
+    val_accuracy = 0
+    val_images_seen = 0
+
+    model.eval()
+    for i, (images, labels) in enumerate(val_loader):
+        images = images.to(DEVICE)
+        labels = labels.to(DEVICE)
+
+        # forward pass
+        output = model(images)
+
+        # compute loss
+        loss = loss_fn(output, labels)
+        val_loss.update(loss.item(), images.size(0))
+
+        # compute accuracy
+        output = torch.argmax(output, dim=1)
+        correctly_predicted = torch.sum(output == labels).item()
+        val_accuracy += correctly_predicted
+        val_images_seen += images.size(0)
+
+    # adjust learning rate
+    lr = LEARNING_RATE * (0.1 ** (epoch // 30))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
     print(
-        "chunk: " + str(chunk + 1) + "/" + str(NUM_TRAIN_CHUNKS) + " - " +
-        "train_batch: " + str(i//BATCH_SIZE + 1) + "/" + str(n_train_batches) + " - " +
-        "train_loss: " + str(round(train_loss/images_processed, 4)) + " - " +
-        "train_accuracy: " + str(round(train_accuracy/images_processed, 4)) + " - " +
-        "val_loss: " + str(round(val_loss/len(X), 4)) + " - " +
-        "val_accuracy: " + str(round(val_accuracy/len(X), 4))
+        "batch: " + str(i+1) + "/" + str(len(train_loader)) + " - " +
+        "train_loss: " + str(train_loss) + " - " +
+        "train_accuracy: " + str(round(train_accuracy/train_images_seen, 4)) + " - " +
+        "val_loss: " + str(val_loss) + " - " +
+        "val_accuracy: " + str(round(val_accuracy/val_images_seen, 4)) + " "*10
     )
 
-    del X
-    del y
