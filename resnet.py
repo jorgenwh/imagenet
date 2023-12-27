@@ -5,6 +5,12 @@ import torch.nn.functional as F
 from pytorch_model_summary import summary
 
 
+_CONV2_X = {18: 2, 34: 3, 50: 3, 101: 3, 152: 3}
+_CONV3_X = {18: 2, 34: 4, 50: 4, 101: 4, 152: 8}
+_CONV4_X = {18: 2, 34: 6, 50: 6, 101: 23, 152: 36}
+_CONV5_X = {18: 2, 34: 3, 50: 3, 101: 3, 152: 3}
+
+
 class BasicBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super(BasicBlock, self).__init__()
@@ -74,218 +80,60 @@ class BottleneckBlock(nn.Module):
         return r
 
 
-class ResNet18(nn.Module):
-    def __init__(self, input_channels=3, input_height=224, input_width=224, num_classes=1000):
-        super(ResNet18, self).__init__()
+class ResNet(nn.Module):
+    def __init__(self, num_layers, input_channels=3, input_height=224, input_width=224, num_classes=1000):
+        super(ResNet, self).__init__()
+        assert num_layers in [18, 34, 50, 101, 152], "num_layers must be in [18, 34, 50, 101, 152]"
 
         self.conv1 = nn.Conv2d(in_channels=input_channels, out_channels=64, kernel_size=7, stride=2, padding=3)
         self.bn1 = nn.BatchNorm2d(num_features=64)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
-        self.conv2_x = nn.Sequential(
-            *[BasicBlock(in_channels=64, out_channels=64) for _ in range(2)]
-        )
+        if num_layers in [18, 34]:
+            self.conv2_x = nn.Sequential(
+                *[BasicBlock(in_channels=64, out_channels=64) for _ in range(_CONV2_X[num_layers])]
+            )
+        else:
+            self.conv2_x = nn.Sequential(
+                BottleneckBlock(in_channels=64, out_channels=64),
+                *[BottleneckBlock(in_channels=256, out_channels=64) for _ in range(1, _CONV2_X[num_layers])]
+            )
 
-        self.conv3_x = nn.Sequential(
-            BasicBlock(in_channels=64, out_channels=128, stride=2),
-            *[BasicBlock(in_channels=128, out_channels=128) for _ in range(1, 2)]
-        )
+        if num_layers in [18, 34]:
+            self.conv3_x = nn.Sequential(
+                BasicBlock(in_channels=64, out_channels=128, stride=2),
+                *[BasicBlock(in_channels=128, out_channels=128) for _ in range(1, _CONV3_X[num_layers])]
+            )
+        else:
+            self.conv3_x = nn.Sequential(
+                BottleneckBlock(in_channels=256, out_channels=128, stride=2),
+                *[BottleneckBlock(in_channels=512, out_channels=128) for _ in range(1, _CONV3_X[num_layers])]
+            )
 
-        self.conv4_x = nn.Sequential(
-            BasicBlock(in_channels=128, out_channels=256, stride=2),
-            *[BasicBlock(in_channels=256, out_channels=256) for _ in range(1, 2)]
-        )
+        if num_layers in [18, 34]:
+            self.conv4_x = nn.Sequential(
+                BasicBlock(in_channels=128, out_channels=256, stride=2),
+                *[BasicBlock(in_channels=256, out_channels=256) for _ in range(1, _CONV4_X[num_layers])]
+            )
+        else:
+            self.conv4_x = nn.Sequential(
+                BottleneckBlock(in_channels=512, out_channels=256, stride=2),
+                *[BottleneckBlock(in_channels=1024, out_channels=256) for _ in range(1, _CONV4_X[num_layers])]
+            )
 
-        self.conv5_x = nn.Sequential(
-            BasicBlock(in_channels=256, out_channels=512, stride=2),
-            *[BasicBlock(in_channels=512, out_channels=512) for _ in range(1, 2)]
-        )
-
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(in_features=512, out_features=num_classes)
-
-    def forward(self, x):
-        r = self.conv1(x)
-        r = self.bn1(r)
-        r = F.relu(r)
-        r = self.maxpool(r)
-        r = self.conv2_x(r)
-        r = self.conv3_x(r)
-        r = self.conv4_x(r)
-        r = self.conv5_x(r)
-        r = self.avgpool(r)
-        r = torch.flatten(r, 1)
-        r = self.fc(r)
-        return r
-
-
-class ResNet34(nn.Module):
-    def __init__(self, input_channels=3, input_height=224, input_width=224, num_classes=1000):
-        super(ResNet34, self).__init__()
-
-        self.conv1 = nn.Conv2d(in_channels=input_channels, out_channels=64, kernel_size=7, stride=2, padding=3)
-        self.bn1 = nn.BatchNorm2d(num_features=64)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-
-        self.conv2_x = nn.Sequential(
-            *[BasicBlock(in_channels=64, out_channels=64) for _ in range(3)]
-        )
-
-        self.conv3_x = nn.Sequential(
-            BasicBlock(in_channels=64, out_channels=128, stride=2),
-            *[BasicBlock(in_channels=128, out_channels=128) for _ in range(1, 4)]
-        )
-
-        self.conv4_x = nn.Sequential(
-            BasicBlock(in_channels=128, out_channels=256, stride=2),
-            *[BasicBlock(in_channels=256, out_channels=256) for _ in range(1, 6)]
-        )
-
-        self.conv5_x = nn.Sequential(
-            BasicBlock(in_channels=256, out_channels=512, stride=2),
-            *[BasicBlock(in_channels=512, out_channels=512) for _ in range(1, 3)]
-        )
+        if num_layers in [18, 34]:
+            self.conv5_x = nn.Sequential(
+                BasicBlock(in_channels=256, out_channels=512, stride=2),
+                *[BasicBlock(in_channels=512, out_channels=512) for _ in range(1, _CONV5_X[num_layers])]
+            )
+        else:
+            self.conv5_x = nn.Sequential(
+                BottleneckBlock(in_channels=1024, out_channels=512, stride=2),
+                *[BottleneckBlock(in_channels=2048, out_channels=512) for _ in range(1, _CONV5_X[num_layers])]
+            )
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(in_features=512, out_features=num_classes)
-
-    def forward(self, x):
-        r = self.conv1(x)
-        r = self.bn1(r)
-        r = F.relu(r)
-        r = self.maxpool(r)
-        r = self.conv2_x(r)
-        r = self.conv3_x(r)
-        r = self.conv4_x(r)
-        r = self.conv5_x(r)
-        r = self.avgpool(r)
-        r = torch.flatten(r, 1)
-        r = self.fc(r)
-        return r
-
-
-class ResNet50(nn.Module):
-    def __init__(self, input_channels=3, input_height=224, input_width=224, num_classes=1000):
-        super(ResNet50, self).__init__()
-
-        self.conv1 = nn.Conv2d(in_channels=input_channels, out_channels=64, kernel_size=7, stride=2, padding=3)
-        self.bn1 = nn.BatchNorm2d(num_features=64)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-
-        self.conv2_x = nn.Sequential(
-            BottleneckBlock(in_channels=64, out_channels=64),
-            *[BottleneckBlock(in_channels=256, out_channels=64) for _ in range(1, 3)]
-        )
-
-        self.conv3_x = nn.Sequential(
-            BottleneckBlock(in_channels=256, out_channels=128, stride=2),
-            *[BottleneckBlock(in_channels=512, out_channels=128) for _ in range(1, 4)]
-        )
-
-        self.conv4_x = nn.Sequential(
-            BottleneckBlock(in_channels=512, out_channels=256, stride=2),
-            *[BottleneckBlock(in_channels=1024, out_channels=256) for _ in range(1, 6)]
-        )
-
-        self.conv5_x = nn.Sequential(
-            BottleneckBlock(in_channels=1024, out_channels=512, stride=2),
-            *[BottleneckBlock(in_channels=2048, out_channels=512) for _ in range(1, 3)]
-        )
-
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(in_features=2048, out_features=num_classes)
-
-    def forward(self, x):
-        r = self.conv1(x)
-        r = self.bn1(r)
-        r = F.relu(r)
-        r = self.maxpool(r)
-        r = self.conv2_x(r)
-        r = self.conv3_x(r)
-        r = self.conv4_x(r)
-        r = self.conv5_x(r)
-        r = self.avgpool(r)
-        r = torch.flatten(r, 1)
-        r = self.fc(r)
-        return r
-
-
-class ResNet101(nn.Module):
-    def __init__(self, input_channels=3, input_height=224, input_width=224, num_classes=1000):
-        super(ResNet101, self).__init__()
-
-        self.conv1 = nn.Conv2d(in_channels=input_channels, out_channels=64, kernel_size=7, stride=2, padding=3)
-        self.bn1 = nn.BatchNorm2d(num_features=64)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-
-        self.conv2_x = nn.Sequential(
-            BottleneckBlock(in_channels=64, out_channels=64),
-            *[BottleneckBlock(in_channels=256, out_channels=64) for _ in range(1, 3)]
-        )
-
-        self.conv3_x = nn.Sequential(
-            BottleneckBlock(in_channels=256, out_channels=128, stride=2),
-            *[BottleneckBlock(in_channels=512, out_channels=128) for _ in range(1, 4)]
-        )
-
-        self.conv4_x = nn.Sequential(
-            BottleneckBlock(in_channels=512, out_channels=256, stride=2),
-            *[BottleneckBlock(in_channels=1024, out_channels=256) for _ in range(1, 23)]
-        )
-
-        self.conv5_x = nn.Sequential(
-            BottleneckBlock(in_channels=1024, out_channels=512, stride=2),
-            *[BottleneckBlock(in_channels=2048, out_channels=512) for _ in range(1, 3)]
-        )
-
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(in_features=2048, out_features=num_classes)
-
-    def forward(self, x):
-        r = self.conv1(x)
-        r = self.bn1(r)
-        r = F.relu(r)
-        r = self.maxpool(r)
-        r = self.conv2_x(r)
-        r = self.conv3_x(r)
-        r = self.conv4_x(r)
-        r = self.conv5_x(r)
-        r = self.avgpool(r)
-        r = torch.flatten(r, 1)
-        r = self.fc(r)
-        return r
-
-
-class ResNet152(nn.Module):
-    def __init__(self, input_channels=3, input_height=224, input_width=224, num_classes=1000):
-        super(ResNet152, self).__init__()
-
-        self.conv1 = nn.Conv2d(in_channels=input_channels, out_channels=64, kernel_size=7, stride=2, padding=3)
-        self.bn1 = nn.BatchNorm2d(num_features=64)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-
-        self.conv2_x = nn.Sequential(
-            BottleneckBlock(in_channels=64, out_channels=64),
-            *[BottleneckBlock(in_channels=256, out_channels=64) for _ in range(1, 3)]
-        )
-
-        self.conv3_x = nn.Sequential(
-            BottleneckBlock(in_channels=256, out_channels=128, stride=2),
-            *[BottleneckBlock(in_channels=512, out_channels=128) for _ in range(1, 8)]
-        )
-
-        self.conv4_x = nn.Sequential(
-            BottleneckBlock(in_channels=512, out_channels=256, stride=2),
-            *[BottleneckBlock(in_channels=1024, out_channels=256) for _ in range(1, 36)]
-        )
-
-        self.conv5_x = nn.Sequential(
-            BottleneckBlock(in_channels=1024, out_channels=512, stride=2),
-            *[BottleneckBlock(in_channels=2048, out_channels=512) for _ in range(1, 3)]
-        )
-
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(in_features=2048, out_features=num_classes)
+        self.fc = nn.Linear(in_features=512 if num_layers in [18, 34] else 2048, out_features=num_classes)
 
     def forward(self, x):
         r = self.conv1(x)
@@ -303,26 +151,13 @@ class ResNet152(nn.Module):
 
 
 def resnet(num_layers, input_channels, input_height, input_width, num_classes):
-    if num_layers == 18:
-        return ResNet18(input_channels, input_height, input_width, num_classes)
-    elif num_layers == 34:
-        return ResNet34(input_channels, input_height, input_width, num_classes)
-    elif num_layers == 50:
-        return ResNet50(input_channels, input_height, input_width, num_classes)
-    elif num_layers == 101:
-        return ResNet101(input_channels, input_height, input_width, num_classes)
-    elif num_layers == 152:
-        return ResNet152(input_channels, input_height, input_width, num_classes)
-    else:
-        raise ValueError("Unsupported ResNet model. Supported models are: 18, 34, 50, 101, 152")
+    assert num_layers in [18, 34, 50, 101, 152], "Unsupported ResNet model. Supported models are: 18, 34, 50, 101, 152"
+    return ResNet(num_layers, input_channels, input_height, input_width, num_classes)
 
 
 if __name__ == "__main__":
-    inp = torch.randn(128, 3, 224, 224)
-    model = resnet(num_layers=50, input_channels=3, input_height=224, input_width=224, num_classes=1000)
+    inp = torch.randn(1, 3, 224, 224)
+    model = resnet(num_layers=152, input_channels=3, input_height=224, input_width=224, num_classes=1000)
     print(summary(model, inp))
-    #model = model.to('cuda')
-    #inp = inp.to('cuda')
-    #out = model(inp)
 
     
