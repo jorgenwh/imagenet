@@ -1,13 +1,14 @@
 import time
 import torch
 import torch.nn.functional as F
+from torch.cuda.amp import autocast, GradScaler
 
 from alexnet import AlexNet
 from resnet import resnet
 from data_loader import get_data_loader
 from helpers import AverageMeter
 
-LOAD_MODEL = None # set to path of model to load
+LOAD_MODEL = None
 IMAGE_SIZE = 224
 IMAGE_CHANNELS = 3
 NUM_CLASSES = 1000
@@ -18,17 +19,17 @@ MOMENTUM = 0.9
 WEIGHT_DECAY = 0.0001
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-#model = AlexNet(
-#        input_channels=IMAGE_CHANNELS,
-#        input_height=IMAGE_SIZE, 
-#        input_width=IMAGE_SIZE, 
-#        num_classes=NUM_CLASSES
-#)
+# model = AlexNet(
+#         input_channels=IMAGE_CHANNELS,
+#         input_height=IMAGE_SIZE,
+#         input_width=IMAGE_SIZE,
+#         num_classes=NUM_CLASSES
+# )
 model = resnet(
-        num_layers=18, 
+        num_layers=18,
         input_channels=IMAGE_CHANNELS,
-        input_height=IMAGE_SIZE, 
-        input_width=IMAGE_SIZE, 
+        input_height=IMAGE_SIZE,
+        input_width=IMAGE_SIZE,
         num_classes=NUM_CLASSES
 )
 
@@ -41,8 +42,11 @@ loss_fn = torch.nn.CrossEntropyLoss()
 
 train_loader, val_loader = get_data_loader(image_size=IMAGE_SIZE, batch_size=BATCH_SIZE)
 
+# Create a GradScaler for mixed precision training
+scaler = GradScaler()
+
 for epoch in range(EPOCHS):
-    print("Epoch: " + str(epoch+1) + "/" + str(EPOCHS))
+    print("Epoch: " + str(epoch + 1) + "/" + str(EPOCHS))
 
     train_loss = AverageMeter()
     train_accuracy = 0
@@ -53,29 +57,34 @@ for epoch in range(EPOCHS):
         images = images.to(DEVICE)
         labels = labels.to(DEVICE)
 
-        # forward pass
-        output = model(images)
-
-        # compute loss
-        loss = loss_fn(output, labels)
-        train_loss.update(loss.item(), images.size(0))
-
-        # compute accuracy
-        output = torch.argmax(output, dim=1)
-        correctly_predicted = torch.sum(output == labels).item()
-        train_accuracy += correctly_predicted 
-        train_images_seen += images.size(0)
-
-        # backward pass
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
 
-        print(
-            "batch: " + str(i+1) + "/" + str(len(train_loader)) + " - " +
-            "train_loss: " + str(train_loss) + " - " +
-            "train_accuracy: " + str(round(train_accuracy/train_images_seen, 4)) + " "*10, end="\r"
-        )
+        # Use autocast to enable mixed-precision training
+        with autocast():
+            # forward pass
+            output = model(images)
+
+            # compute loss
+            loss = loss_fn(output, labels)
+            train_loss.update(loss.item(), images.size(0))
+
+            # backward pass
+            scaler.scale(loss).backward()
+
+            # compute accuracy
+            output = torch.argmax(output, dim=1)
+            correctly_predicted = torch.sum(output == labels).item()
+            train_accuracy += correctly_predicted
+            train_images_seen += images.size(0)
+
+            scaler.step(optimizer)
+            scaler.update()
+
+            print(
+                "batch: " + str(i + 1) + "/" + str(len(train_loader)) + " - " +
+                "train_loss: " + str(train_loss) + " - " +
+                "train_accuracy: " + str(round(train_accuracy / train_images_seen, 4)) + " " * 10, end="\r"
+            )
 
     # validation
     val_loss = AverageMeter()
@@ -88,7 +97,8 @@ for epoch in range(EPOCHS):
         labels = labels.to(DEVICE)
 
         # forward pass
-        output = model(images)
+        with torch.no_grad(), autocast():
+            output = model(images)
 
         # compute loss
         loss = loss_fn(output, labels)
@@ -106,10 +116,10 @@ for epoch in range(EPOCHS):
         param_group['lr'] = lr
 
     print(
-        "batch: " + str(i+1) + "/" + str(len(train_loader)) + " - " +
+        "batch: " + str(i + 1) + "/" + str(len(train_loader)) + " - " +
         "train_loss: " + str(train_loss) + " - " +
-        "train_accuracy: " + str(round(train_accuracy/train_images_seen, 4)) + " - " +
+        "train_accuracy: " + str(round(train_accuracy / train_images_seen, 4)) + " - " +
         "val_loss: " + str(val_loss) + " - " +
-        "val_accuracy: " + str(round(val_accuracy/val_images_seen, 4)) + " "*10
+        "val_accuracy: " + str(round(val_accuracy / val_images_seen, 4)) + " " * 10
     )
 
