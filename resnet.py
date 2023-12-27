@@ -18,14 +18,26 @@ class BasicBlock(nn.Module):
         self.conv1 = nn.Conv2d(
                 in_channels=in_channels, 
                 out_channels=out_channels, 
-                kernel_size=3, stride=stride, padding=1)
+                kernel_size=3, stride=stride, padding=1
+        )
         self.bn1 = nn.BatchNorm2d(num_features=out_channels)
-        self.conv2 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(
+                in_channels=out_channels, 
+                out_channels=out_channels, 
+                kernel_size=3, 
+                stride=1, 
+                padding=1
+        )
         self.bn2 = nn.BatchNorm2d(num_features=out_channels)
 
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride),
+                nn.Conv2d(
+                    in_channels=in_channels, 
+                    out_channels=out_channels, 
+                    kernel_size=1, 
+                    stride=stride
+                ),
                 nn.BatchNorm2d(num_features=out_channels)
             )
         else:
@@ -46,26 +58,34 @@ class BottleneckBlock(nn.Module):
         self.conv1 = nn.Conv2d(
             in_channels=in_channels,
             out_channels=out_channels,
-            kernel_size=1, stride=1, padding=0)
+            kernel_size=1, stride=1, padding=0
+        )
         self.bn1 = nn.BatchNorm2d(num_features=out_channels)
         self.conv2 = nn.Conv2d(
                 in_channels=out_channels, 
                 out_channels=out_channels, 
                 kernel_size=3, 
                 stride=stride, 
-                padding=1)
+                padding=1
+        )
         self.bn2 = nn.BatchNorm2d(num_features=out_channels)
         self.conv3 = nn.Conv2d(
                 in_channels=out_channels, 
                 out_channels=out_channels*4, 
                 kernel_size=1, 
                 stride=1, 
-                padding=0)
+                padding=0
+        )
         self.bn3 = nn.BatchNorm2d(num_features=out_channels*4)
 
         if stride != 1 or in_channels != out_channels*4:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels=in_channels, out_channels=out_channels*4, kernel_size=1, stride=stride),
+                nn.Conv2d(
+                    in_channels=in_channels, 
+                    out_channels=out_channels*4, 
+                    kernel_size=1, 
+                    stride=stride
+                ),
                 nn.BatchNorm2d(num_features=out_channels*4)
             )
         else:
@@ -85,7 +105,13 @@ class ResNet(nn.Module):
         super(ResNet, self).__init__()
         assert num_layers in [18, 34, 50, 101, 152], "num_layers must be in [18, 34, 50, 101, 152]"
 
-        self.conv1 = nn.Conv2d(in_channels=input_channels, out_channels=64, kernel_size=7, stride=2, padding=3)
+        self.conv1 = nn.Conv2d(
+                in_channels=input_channels, 
+                out_channels=64, 
+                kernel_size=7, 
+                stride=2, 
+                padding=3
+        )
         self.bn1 = nn.BatchNorm2d(num_features=64)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
@@ -133,7 +159,10 @@ class ResNet(nn.Module):
             )
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(in_features=512 if num_layers in [18, 34] else 2048, out_features=num_classes)
+        self.fc = nn.Linear(
+                in_features=512 if num_layers in [18, 34] else 2048, 
+                out_features=num_classes
+        )
 
     def forward(self, x):
         r = self.conv1(x)
